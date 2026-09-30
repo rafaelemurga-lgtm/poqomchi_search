@@ -1,3 +1,8 @@
 [build]
-  command = "git clone --depth 1 --branch stable https://github.com/flutter/flutter.git $HOME/flutter && export PATH=\"$HOME/flutter/bin:$PATH\" && flutter config --no-analytics && flutter pub get && flutter build web --release"
-  publish = "build/web"
+
+command = "git clone --depth 1 --branch stable https://github.com/flutter/flutter.git $HOME/flutter && export PATH=\"$HOME/flutter/bin:$PATH\" && flutter config --no-analytics && flutter pub get && flutter build web --release"
+
+publish = "build/web"
+
+[functions]
+directory = "netlify/functions"

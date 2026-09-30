@@ -31,69 +31,58 @@ export default async (req) => {
     urlPoqomchi.searchParams.set('r', 'occ');
     urlPoqomchi.searchParams.set('st', 'b');
 
-    const respuestaPoqomchi = await fetch(urlPoqomchi);
+    const respuestaPoqomchi =
+        await fetch(urlPoqomchi);
 
     if (!respuestaPoqomchi.ok) {
-      const cuerpo = await respuestaPoqomchi.text();
+      const cuerpo =
+          await respuestaPoqomchi.text();
 
       return new Response(
         JSON.stringify({
-          error: `WOL respondió con el código ${respuestaPoqomchi.status}.`,
+          error:
+              `WOL respondió con el código ${respuestaPoqomchi.status}.`,
           detalle: cuerpo,
         }),
         {
           status: respuestaPoqomchi.status,
           headers: {
-            'Content-Type': 'application/json; charset=utf-8',
+            'Content-Type':
+                'application/json; charset=utf-8',
             'Access-Control-Allow-Origin': '*',
           },
         },
       );
     }
 
-    const htmlPoqomchi = await respuestaPoqomchi.text();
+    const htmlPoqomchi =
+        await respuestaPoqomchi.text();
 
     // =========================================================
-    // 2. Encontrar los identificadores de los artículos
+    // 2. Buscar también directamente en español
     // =========================================================
 
-    const patronEnlaces =
-      /\/poh\/wol\/d\/r1086\/lp-pqm\/(\d+)/g;
+    const urlEspanol = new URL(
+      'https://wol.jw.org/es/wol/s/r4/lp-s',
+    );
 
-    const ids = new Set();
+    urlEspanol.searchParams.set('q', palabra);
+    urlEspanol.searchParams.set('p', 'par');
+    urlEspanol.searchParams.set('r', 'occ');
+    urlEspanol.searchParams.set('st', 'b');
 
-    let coincidencia;
+    const respuestaEspanol =
+        await fetch(urlEspanol);
 
-    while ((coincidencia = patronEnlaces.exec(htmlPoqomchi)) !== null) {
-      ids.add(coincidencia[1]);
+    let htmlEspanol = '';
+
+    if (respuestaEspanol.ok) {
+      htmlEspanol =
+          await respuestaEspanol.text();
     }
 
     // =========================================================
-    // 3. Obtener las versiones españolas
-    // =========================================================
-
-    const articulosEspanol = {};
-
-    for (const id of ids) {
-      try {
-        const urlEspanol = new URL(
-          `https://wol.jw.org/es/wol/d/r4/lp-s/${id}`,
-        );
-
-        const respuestaEspanol = await fetch(urlEspanol);
-
-        if (respuestaEspanol.ok) {
-          articulosEspanol[id] =
-              await respuestaEspanol.text();
-        }
-      } catch (error) {
-        // Si un artículo no tiene versión española,
-        // simplemente continuamos con los demás.
-      }
-    }
-
-    // =========================================================
-    // 4. Enviar todo a Flutter
+    // 3. Enviar los dos resultados a Flutter
     // =========================================================
 
     return new Response(
@@ -101,12 +90,13 @@ export default async (req) => {
         ok: true,
         palabra: palabra,
         htmlPoqomchi: htmlPoqomchi,
-        articulosEspanol: articulosEspanol,
+        htmlEspanol: htmlEspanol,
       }),
       {
         status: 200,
         headers: {
-          'Content-Type': 'application/json; charset=utf-8',
+          'Content-Type':
+              'application/json; charset=utf-8',
           'Access-Control-Allow-Origin': '*',
         },
       },
@@ -120,7 +110,8 @@ export default async (req) => {
       {
         status: 500,
         headers: {
-          'Content-Type': 'application/json; charset=utf-8',
+          'Content-Type':
+              'application/json; charset=utf-8',
           'Access-Control-Allow-Origin': '*',
         },
       },

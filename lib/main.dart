@@ -45,13 +45,15 @@ class _SearchPageState extends State<SearchPage> {
   bool _buscando = false;
 
   Future<void> _buscar() async {
-    final palabraOriginal = _searchController.text.trim();
+    final palabraOriginal =
+        _searchController.text.trim();
 
     if (palabraOriginal.isEmpty) {
       return;
     }
 
-    final palabra = palabraOriginal.replaceAll("'", "ʼ");
+    final palabra =
+        palabraOriginal.replaceAll("'", "ʼ");
 
     setState(() {
       _buscando = true;
@@ -85,121 +87,53 @@ class _SearchPageState extends State<SearchPage> {
         return;
       }
 
-      // La Function de Netlify devuelve JSON.
       final datos =
-          jsonDecode(respuesta.body) as Map<String, dynamic>;
+          jsonDecode(respuesta.body)
+              as Map<String, dynamic>;
 
       final htmlPoqomchi =
           datos['htmlPoqomchi'] as String? ?? '';
 
-      final articulosEspanol =
-          Map<String, dynamic>.from(
-        datos['articulosEspanol'] ?? {},
+      final htmlEspanol =
+          datos['htmlEspanol'] as String? ?? '';
+
+      final resultadosPoqomchi =
+          _extraerResultados(
+        htmlPoqomchi,
       );
 
-      final documento =
-          html_parser.parse(htmlPoqomchi);
-
-      final enlaces = documento.querySelectorAll('a');
-
-      final enlacesWol = enlaces.where((enlace) {
-        final href = enlace.attributes['href'] ?? '';
-        return href.contains('/poh/wol/');
-      }).toList();
-
-      final resultados = enlacesWol.where((enlace) {
-        final href = enlace.attributes['href'] ?? '';
-        return href.contains('/poh/wol/d/');
-      }).toList();
+      final resultadosEspanol =
+          _extraerResultados(
+        htmlEspanol,
+      );
 
       final nuevosResultados =
           <Map<String, String>>[];
 
-      for (final resultado in resultados) {
-        final bloqueResultado =
-            resultado.parent?.parent;
+      for (int i = 0;
+          i < resultadosPoqomchi.length;
+          i++) {
+        final resultadoPoqomchi =
+            resultadosPoqomchi[i];
 
-        if (bloqueResultado == null) {
-          continue;
+        Map<String, String>? resultadoEspanol;
+
+        if (i < resultadosEspanol.length) {
+          resultadoEspanol =
+              resultadosEspanol[i];
         }
-
-        final titulo = resultado.text.trim();
-
-        final cantidad =
-            bloqueResultado
-                    .querySelector('.count')
-                    ?.text
-                    .trim() ??
-                '';
-
-        final parrafos =
-            bloqueResultado.querySelectorAll(
-          'li.searchResult p',
-        );
-
-        final fragmento = parrafos
-            .map((p) => p.text.trim())
-            .where((texto) => texto.isNotEmpty)
-            .join('\n\n');
-
-        final href =
-            resultado.attributes['href'] ?? '';
-
-        // Intentamos obtener el número de párrafo
-        // del resultado Pocomchí.
-        String numeroParrafo = '';
-
-        for (final parrafo in parrafos) {
-          final elementoParrafo =
-              parrafo.querySelector('[data-pnum]');
-
-          if (elementoParrafo != null) {
-            numeroParrafo =
-                elementoParrafo.attributes['data-pnum'] ??
-                    '';
-
-            if (numeroParrafo.isNotEmpty) {
-              break;
-            }
-          }
-
-          final pnum =
-              parrafo.attributes['data-pnum'] ?? '';
-
-          if (pnum.isNotEmpty) {
-            numeroParrafo = pnum;
-            break;
-          }
-        }
-
-        // Obtener el identificador del artículo.
-        final coincidenciaId = RegExp(
-          r'/poh/wol/d/r1086/lp-pqm/(\d+)',
-        ).firstMatch(href);
-
-        final idArticulo =
-            coincidenciaId?.group(1) ?? '';
-
-        // Obtener el HTML del artículo español.
-        final htmlEspanol =
-            articulosEspanol[idArticulo] as String? ??
-                '';
-
-        // Buscar el párrafo correspondiente en español.
-        final fragmentoEspanol =
-            _extraerFragmentoEspanol(
-          htmlEspanol,
-          numeroParrafo,
-        );
 
         nuevosResultados.add({
-          'titulo': titulo,
-          'cantidad': cantidad,
-          'fragmento': fragmento,
-          'fragmentoEspanol': fragmentoEspanol,
-          'enlace': href,
-          'idArticulo': idArticulo,
-          'numeroParrafo': numeroParrafo,
+          'titulo':
+              resultadoPoqomchi['titulo'] ?? '',
+          'cantidad':
+              resultadoPoqomchi['cantidad'] ?? '',
+          'fragmento':
+              resultadoPoqomchi['fragmento'] ?? '',
+          'fragmentoEspanol':
+              resultadoEspanol?['fragmento'] ?? '',
+          'enlace':
+              resultadoPoqomchi['enlace'] ?? '',
         });
       }
 
@@ -226,68 +160,89 @@ class _SearchPageState extends State<SearchPage> {
     }
   }
 
-  String _extraerFragmentoEspanol(
+  List<Map<String, String>> _extraerResultados(
     String html,
-    String numeroParrafo,
   ) {
     if (html.isEmpty) {
-      return '';
+      return [];
     }
 
     final documento =
         html_parser.parse(html);
 
-    // Primero intentamos localizar exactamente
-    // el mismo número de párrafo.
-    if (numeroParrafo.isNotEmpty) {
-      final parrafo = documento.querySelector(
-        '[data-pnum="$numeroParrafo"]',
+    final enlaces =
+        documento.querySelectorAll('a');
+
+    final resultados =
+        enlaces.where((enlace) {
+      final href =
+          enlace.attributes['href'] ?? '';
+
+      return href.contains('/wol/d/');
+    }).toList();
+
+    final encontrados =
+        <Map<String, String>>[];
+
+    final enlacesProcesados =
+        <String>{};
+
+    for (final resultado in resultados) {
+      final href =
+          resultado.attributes['href'] ?? '';
+
+      if (href.isEmpty) {
+        continue;
+      }
+
+      if (!enlacesProcesados.add(href)) {
+        continue;
+      }
+
+      final bloqueResultado =
+          resultado.parent?.parent;
+
+      if (bloqueResultado == null) {
+        continue;
+      }
+
+      final titulo =
+          resultado.text.trim();
+
+      final cantidad =
+          bloqueResultado
+                  .querySelector('.count')
+                  ?.text
+                  .trim() ??
+              '';
+
+      final parrafos =
+          bloqueResultado.querySelectorAll(
+        'li.searchResult p',
       );
 
-      if (parrafo != null) {
-        final texto = parrafo.text.trim();
+      final fragmento = parrafos
+          .map(
+            (p) => p.text.trim(),
+          )
+          .where(
+            (texto) => texto.isNotEmpty,
+          )
+          .join('\n\n');
 
-        if (texto.isNotEmpty) {
-          return texto;
-        }
+      if (fragmento.isEmpty) {
+        continue;
       }
 
-      // Algunas páginas pueden utilizar el atributo
-      // data-pid en lugar de data-pnum.
-      final parrafos =
-          documento.querySelectorAll('[data-pnum]');
-
-      for (final elemento in parrafos) {
-        final pnum =
-            elemento.attributes['data-pnum'] ?? '';
-
-        if (pnum == numeroParrafo) {
-          final texto = elemento.text.trim();
-
-          if (texto.isNotEmpty) {
-            return texto;
-          }
-        }
-      }
+      encontrados.add({
+        'titulo': titulo,
+        'cantidad': cantidad,
+        'fragmento': fragmento,
+        'enlace': href,
+      });
     }
 
-    // Si no encontramos el número de párrafo,
-    // usamos el primer párrafo de contenido
-    // como respaldo.
-    final parrafosArticulo =
-        documento.querySelectorAll(
-      'p[data-pid], p[data-pnum]',
-    );
-
-    for (final parrafo in parrafosArticulo) {
-      final texto = parrafo.text.trim();
-
-      if (texto.isNotEmpty) {
-        return texto;
-      }
-    }
-
-    return '';
+    return encontrados;
   }
 
   List<TextSpan> _resaltarPalabra(
@@ -342,8 +297,14 @@ class _SearchPageState extends State<SearchPage> {
   Future<void> _abrirArticulo(
     String enlace,
   ) async {
+    if (enlace.isEmpty) {
+      return;
+    }
+
     final url = Uri.parse(
-      'https://wol.jw.org$enlace',
+      enlace.startsWith('http')
+          ? enlace
+          : 'https://wol.jw.org$enlace',
     );
 
     if (await canLaunchUrl(url)) {
@@ -414,7 +375,8 @@ class _SearchPageState extends State<SearchPage> {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius:
+            BorderRadius.circular(12),
         border: Border.all(
           color: Colors.grey.shade300,
         ),
@@ -444,9 +406,8 @@ class _SearchPageState extends State<SearchPage> {
         resultado['fragmentoEspanol'] ?? '';
 
     return Card(
-      margin: const EdgeInsets.only(
-        bottom: 16,
-      ),
+      margin:
+          const EdgeInsets.only(bottom: 16),
       elevation: 2,
       shadowColor:
           Colors.black.withValues(alpha: 0.08),
@@ -464,7 +425,8 @@ class _SearchPageState extends State<SearchPage> {
               resultado['titulo'] ?? '',
               style: const TextStyle(
                 fontSize: 18,
-                fontWeight: FontWeight.bold,
+                fontWeight:
+                    FontWeight.bold,
                 height: 1.3,
               ),
             ),
@@ -479,12 +441,16 @@ class _SearchPageState extends State<SearchPage> {
                   horizontal: 10,
                   vertical: 5,
                 ),
-                decoration: BoxDecoration(
-                  color: Colors.indigo.withValues(
+                decoration:
+                    BoxDecoration(
+                  color:
+                      Colors.indigo.withValues(
                     alpha: 0.1,
                   ),
                   borderRadius:
-                      BorderRadius.circular(20),
+                      BorderRadius.circular(
+                    20,
+                  ),
                 ),
                 child: Text(
                   resultado['cantidad'] ?? '',
@@ -499,8 +465,6 @@ class _SearchPageState extends State<SearchPage> {
 
             const SizedBox(height: 16),
 
-            // En pantallas grandes mostramos
-            // Pocomchí y español lado a lado.
             LayoutBuilder(
               builder: (
                 context,
@@ -512,13 +476,17 @@ class _SearchPageState extends State<SearchPage> {
                 if (ancho >= 700) {
                   return Row(
                     crossAxisAlignment:
-                        CrossAxisAlignment.start,
+                        CrossAxisAlignment
+                            .start,
                     children: [
                       Expanded(
                         child: _panelIdioma(
-                          idioma: 'POQOMCHÍ',
-                          texto: fragmento,
-                          icono: Icons.translate,
+                          idioma:
+                              'POQOMCHÍ',
+                          texto:
+                              fragmento,
+                          icono:
+                              Icons.translate,
                           resaltar: true,
                         ),
                       ),
@@ -527,7 +495,8 @@ class _SearchPageState extends State<SearchPage> {
                       ),
                       Expanded(
                         child: _panelIdioma(
-                          idioma: 'ESPAÑOL',
+                          idioma:
+                              'ESPAÑOL',
                           texto:
                               fragmentoEspanol,
                           icono:
@@ -539,21 +508,27 @@ class _SearchPageState extends State<SearchPage> {
                   );
                 }
 
-                // En teléfono se muestran
-                // uno debajo del otro.
                 return Column(
                   children: [
                     _panelIdioma(
-                      idioma: 'POQOMCHÍ',
-                      texto: fragmento,
-                      icono: Icons.translate,
+                      idioma:
+                          'POQOMCHÍ',
+                      texto:
+                          fragmento,
+                      icono:
+                          Icons.translate,
                       resaltar: true,
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(
+                      height: 12,
+                    ),
                     _panelIdioma(
-                      idioma: 'ESPAÑOL',
-                      texto: fragmentoEspanol,
-                      icono: Icons.language,
+                      idioma:
+                          'ESPAÑOL',
+                      texto:
+                          fragmentoEspanol,
+                      icono:
+                          Icons.language,
                       resaltar: false,
                     ),
                   ],
@@ -564,11 +539,14 @@ class _SearchPageState extends State<SearchPage> {
             const SizedBox(height: 18),
 
             Align(
-              alignment: Alignment.centerRight,
-              child: TextButton.icon(
+              alignment:
+                  Alignment.centerRight,
+              child:
+                  TextButton.icon(
                 onPressed: () {
                   _abrirArticulo(
-                    resultado['enlace'] ?? '',
+                    resultado['enlace'] ??
+                        '',
                   );
                 },
                 icon: const Icon(
@@ -578,7 +556,8 @@ class _SearchPageState extends State<SearchPage> {
                 label: const Text(
                   'Abrir artículo en WOL',
                 ),
-                style: TextButton.styleFrom(
+                style:
+                    TextButton.styleFrom(
                   foregroundColor:
                       Colors.indigo,
                   textStyle:
@@ -601,11 +580,14 @@ class _SearchPageState extends State<SearchPage> {
   ) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Colors.indigo,
-        foregroundColor: Colors.white,
+        backgroundColor:
+            Colors.indigo,
+        foregroundColor:
+            Colors.white,
         elevation: 0,
         title: const Row(
-          mainAxisSize: MainAxisSize.min,
+          mainAxisSize:
+              MainAxisSize.min,
           children: [
             Icon(
               Icons.menu_book_rounded,
@@ -614,7 +596,8 @@ class _SearchPageState extends State<SearchPage> {
             Text(
               'Buscador Poqomchi\'',
               style: TextStyle(
-                fontWeight: FontWeight.bold,
+                fontWeight:
+                    FontWeight.bold,
               ),
             ),
           ],
@@ -623,7 +606,8 @@ class _SearchPageState extends State<SearchPage> {
       ),
       body: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(
+          constraints:
+              const BoxConstraints(
             maxWidth: 1100,
           ),
           child: Padding(
@@ -631,11 +615,14 @@ class _SearchPageState extends State<SearchPage> {
                 const EdgeInsets.all(24),
             child: Column(
               children: [
-                const SizedBox(height: 20),
+                const SizedBox(
+                  height: 20,
+                ),
 
                 const Text(
                   'Buscar en las publicaciones de jw.org',
-                  textAlign: TextAlign.center,
+                  textAlign:
+                      TextAlign.center,
                   style: TextStyle(
                     fontSize: 30,
                     fontWeight:
@@ -643,30 +630,38 @@ class _SearchPageState extends State<SearchPage> {
                   ),
                 ),
 
-                const SizedBox(height: 8),
+                const SizedBox(
+                  height: 8,
+                ),
 
                 Text(
                   'Encuentra palabras y expresiones '
                   'en poqomchi\'',
-                  textAlign: TextAlign.center,
+                  textAlign:
+                      TextAlign.center,
                   style: TextStyle(
                     fontSize: 16,
-                    color: Colors.grey[700],
+                    color:
+                        Colors.grey[700],
                   ),
                 ),
 
-                const SizedBox(height: 28),
+                const SizedBox(
+                  height: 28,
+                ),
 
                 Row(
                   children: [
                     Expanded(
-                      child: TextField(
+                      child:
+                          TextField(
                         controller:
                             _searchController,
                         textInputAction:
-                            TextInputAction.search,
-                        onSubmitted: (_) =>
-                            _buscar(),
+                            TextInputAction
+                                .search,
+                        onSubmitted:
+                            (_) => _buscar(),
                         decoration:
                             InputDecoration(
                           hintText:
@@ -719,9 +714,8 @@ class _SearchPageState extends State<SearchPage> {
                             ),
                             borderSide:
                                 BorderSide(
-                              color: Colors
-                                  .grey
-                                  .shade300,
+                              color:
+                                  Colors.grey.shade300,
                             ),
                           ),
                           focusedBorder:
@@ -742,22 +736,26 @@ class _SearchPageState extends State<SearchPage> {
                       ),
                     ),
 
-                    const SizedBox(width: 12),
+                    const SizedBox(
+                      width: 12,
+                    ),
 
                     SizedBox(
                       height: 56,
                       child:
                           ElevatedButton.icon(
-                        onPressed: _buscando
-                            ? null
-                            : _buscar,
+                        onPressed:
+                            _buscando
+                                ? null
+                                : _buscar,
                         icon: _buscando
                             ? const SizedBox(
                                 width: 20,
                                 height: 20,
                                 child:
                                     CircularProgressIndicator(
-                                  strokeWidth: 2,
+                                  strokeWidth:
+                                      2,
                                   color:
                                       Colors.white,
                                 ),
@@ -796,7 +794,9 @@ class _SearchPageState extends State<SearchPage> {
                   ],
                 ),
 
-                const SizedBox(height: 24),
+                const SizedBox(
+                  height: 24,
+                ),
 
                 if (_resultados.isNotEmpty)
                   Align(
@@ -816,52 +816,65 @@ class _SearchPageState extends State<SearchPage> {
                   ),
 
                 if (_resultados.isNotEmpty)
-                  const SizedBox(height: 12),
+                  const SizedBox(
+                    height: 12,
+                  ),
 
                 Expanded(
-                  child: _resultados.isEmpty
-                      ? Center(
-                          child: Column(
-                            mainAxisSize:
-                                MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons
-                                    .search_rounded,
-                                size: 64,
-                                color: Colors
-                                    .grey[400],
+                  child:
+                      _resultados.isEmpty
+                          ? Center(
+                              child:
+                                  Column(
+                                mainAxisSize:
+                                    MainAxisSize
+                                        .min,
+                                children: [
+                                  Icon(
+                                    Icons
+                                        .search_rounded,
+                                    size: 64,
+                                    color:
+                                        Colors.grey[400],
+                                  ),
+                                  const SizedBox(
+                                    height: 12,
+                                  ),
+                                  Text(
+                                    _buscando
+                                        ? 'Buscando resultados...'
+                                        : 'Los resultados '
+                                            'aparecerán aquí',
+                                    textAlign:
+                                        TextAlign
+                                            .center,
+                                    style:
+                                        TextStyle(
+                                      fontSize:
+                                          16,
+                                      color:
+                                          Colors.grey[600],
+                                    ),
+                                  ),
+                                ],
                               ),
-                              const SizedBox(
-                                height: 12,
-                              ),
-                              Text(
-                                _buscando
-                                    ? 'Buscando resultados...'
-                                    : 'Los resultados '
-                                        'aparecerán aquí',
-                                textAlign:
-                                    TextAlign
-                                        .center,
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  color: Colors
-                                      .grey[600],
-                                ),
-                              ),
-                            ],
-                          ),
-                        )
-                      : ListView.builder(
-                          itemCount:
-                              _resultados.length,
-                          itemBuilder:
-                              (context, index) {
-                            return _resultadoCard(
-                              _resultados[index],
-                            );
-                          },
-                        ),
+                            )
+                          : ListView
+                              .builder(
+                              itemCount:
+                                  _resultados
+                                      .length,
+                              itemBuilder:
+                                  (
+                                context,
+                                index,
+                              ) {
+                                return _resultadoCard(
+                                  _resultados[
+                                      index],
+                                );
+                              },
+                            ),
                 ),
               ],
             ),

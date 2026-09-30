@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
@@ -57,9 +59,9 @@ class _SearchPageState extends State<SearchPage> {
     });
 
     final url = Uri.parse(
-    '${Uri.base.origin}/.netlify/functions/wol-proxy'
-     '?q=${Uri.encodeComponent(palabra)}',
-);
+      '${Uri.base.origin}/.netlify/functions/wol-proxy'
+      '?q=${Uri.encodeComponent(palabra)}',
+    );
 
     try {
       final respuesta = await http.get(url);
@@ -74,7 +76,8 @@ class _SearchPageState extends State<SearchPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'WOL respondió con el código ${respuesta.statusCode}.',
+              'WOL respondió con el código '
+              '${respuesta.statusCode}.',
             ),
           ),
         );
@@ -82,7 +85,20 @@ class _SearchPageState extends State<SearchPage> {
         return;
       }
 
-      final documento = html_parser.parse(respuesta.body);
+      // La Function de Netlify devuelve JSON.
+      final datos =
+          jsonDecode(respuesta.body) as Map<String, dynamic>;
+
+      final htmlPoqomchi =
+          datos['htmlPoqomchi'] as String? ?? '';
+
+      final articulosEspanol =
+          Map<String, dynamic>.from(
+        datos['articulosEspanol'] ?? {},
+      );
+
+      final documento =
+          html_parser.parse(htmlPoqomchi);
 
       final enlaces = documento.querySelectorAll('a');
 
@@ -96,10 +112,12 @@ class _SearchPageState extends State<SearchPage> {
         return href.contains('/poh/wol/d/');
       }).toList();
 
-      final nuevosResultados = <Map<String, String>>[];
+      final nuevosResultados =
+          <Map<String, String>>[];
 
       for (final resultado in resultados) {
-        final bloqueResultado = resultado.parent?.parent;
+        final bloqueResultado =
+            resultado.parent?.parent;
 
         if (bloqueResultado == null) {
           continue;
@@ -108,23 +126,80 @@ class _SearchPageState extends State<SearchPage> {
         final titulo = resultado.text.trim();
 
         final cantidad =
-            bloqueResultado.querySelector('.count')?.text.trim() ?? '';
+            bloqueResultado
+                    .querySelector('.count')
+                    ?.text
+                    .trim() ??
+                '';
 
         final parrafos =
-            bloqueResultado.querySelectorAll('li.searchResult p');
+            bloqueResultado.querySelectorAll(
+          'li.searchResult p',
+        );
 
         final fragmento = parrafos
             .map((p) => p.text.trim())
             .where((texto) => texto.isNotEmpty)
             .join('\n\n');
 
-        final href = resultado.attributes['href'] ?? '';
+        final href =
+            resultado.attributes['href'] ?? '';
+
+        // Intentamos obtener el número de párrafo
+        // del resultado Pocomchí.
+        String numeroParrafo = '';
+
+        for (final parrafo in parrafos) {
+          final elementoParrafo =
+              parrafo.querySelector('[data-pnum]');
+
+          if (elementoParrafo != null) {
+            numeroParrafo =
+                elementoParrafo.attributes['data-pnum'] ??
+                    '';
+
+            if (numeroParrafo.isNotEmpty) {
+              break;
+            }
+          }
+
+          final pnum =
+              parrafo.attributes['data-pnum'] ?? '';
+
+          if (pnum.isNotEmpty) {
+            numeroParrafo = pnum;
+            break;
+          }
+        }
+
+        // Obtener el identificador del artículo.
+        final coincidenciaId = RegExp(
+          r'/poh/wol/d/r1086/lp-pqm/(\d+)',
+        ).firstMatch(href);
+
+        final idArticulo =
+            coincidenciaId?.group(1) ?? '';
+
+        // Obtener el HTML del artículo español.
+        final htmlEspanol =
+            articulosEspanol[idArticulo] as String? ??
+                '';
+
+        // Buscar el párrafo correspondiente en español.
+        final fragmentoEspanol =
+            _extraerFragmentoEspanol(
+          htmlEspanol,
+          numeroParrafo,
+        );
 
         nuevosResultados.add({
           'titulo': titulo,
           'cantidad': cantidad,
           'fragmento': fragmento,
+          'fragmentoEspanol': fragmentoEspanol,
           'enlace': href,
+          'idArticulo': idArticulo,
+          'numeroParrafo': numeroParrafo,
         });
       }
 
@@ -143,10 +218,76 @@ class _SearchPageState extends State<SearchPage> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error de conexión: $e'),
+          content: Text(
+            'Error de conexión: $e',
+          ),
         ),
       );
     }
+  }
+
+  String _extraerFragmentoEspanol(
+    String html,
+    String numeroParrafo,
+  ) {
+    if (html.isEmpty) {
+      return '';
+    }
+
+    final documento =
+        html_parser.parse(html);
+
+    // Primero intentamos localizar exactamente
+    // el mismo número de párrafo.
+    if (numeroParrafo.isNotEmpty) {
+      final parrafo = documento.querySelector(
+        '[data-pnum="$numeroParrafo"]',
+      );
+
+      if (parrafo != null) {
+        final texto = parrafo.text.trim();
+
+        if (texto.isNotEmpty) {
+          return texto;
+        }
+      }
+
+      // Algunas páginas pueden utilizar el atributo
+      // data-pid en lugar de data-pnum.
+      final parrafos =
+          documento.querySelectorAll('[data-pnum]');
+
+      for (final elemento in parrafos) {
+        final pnum =
+            elemento.attributes['data-pnum'] ?? '';
+
+        if (pnum == numeroParrafo) {
+          final texto = elemento.text.trim();
+
+          if (texto.isNotEmpty) {
+            return texto;
+          }
+        }
+      }
+    }
+
+    // Si no encontramos el número de párrafo,
+    // usamos el primer párrafo de contenido
+    // como respaldo.
+    final parrafosArticulo =
+        documento.querySelectorAll(
+      'p[data-pid], p[data-pnum]',
+    );
+
+    for (final parrafo in parrafosArticulo) {
+      final texto = parrafo.text.trim();
+
+      if (texto.isNotEmpty) {
+        return texto;
+      }
+    }
+
+    return '';
   }
 
   List<TextSpan> _resaltarPalabra(
@@ -159,14 +300,21 @@ class _SearchPageState extends State<SearchPage> {
       ];
     }
 
-    final palabraWol = palabra.replaceAll("'", "ʼ");
-    final textoNormalizado = texto.replaceAll("'", "ʼ");
+    final palabraWol =
+        palabra.replaceAll("'", "ʼ");
 
-    final partes = textoNormalizado.split(palabraWol);
+    final textoNormalizado =
+        texto.replaceAll("'", "ʼ");
 
-    final resultado = <TextSpan>[];
+    final partes =
+        textoNormalizado.split(palabraWol);
 
-    for (int i = 0; i < partes.length; i++) {
+    final resultado =
+        <TextSpan>[];
+
+    for (int i = 0;
+        i < partes.length;
+        i++) {
       if (partes[i].isNotEmpty) {
         resultado.add(
           TextSpan(
@@ -191,7 +339,9 @@ class _SearchPageState extends State<SearchPage> {
     return resultado;
   }
 
-  Future<void> _abrirArticulo(String enlace) async {
+  Future<void> _abrirArticulo(
+    String enlace,
+  ) async {
     final url = Uri.parse(
       'https://wol.jw.org$enlace',
     );
@@ -204,8 +354,251 @@ class _SearchPageState extends State<SearchPage> {
     }
   }
 
+  Widget _tituloIdioma(
+    String texto,
+    IconData icono,
+  ) {
+    return Row(
+      children: [
+        Icon(
+          icono,
+          size: 20,
+          color: Colors.indigo,
+        ),
+        const SizedBox(width: 8),
+        Text(
+          texto,
+          style: const TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+            color: Colors.indigo,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _panelIdioma({
+    required String idioma,
+    required String texto,
+    required IconData icono,
+    required bool resaltar,
+  }) {
+    final contenido = resaltar
+        ? RichText(
+            text: TextSpan(
+              style: TextStyle(
+                fontSize: 15,
+                color: Colors.grey[800],
+                height: 1.55,
+              ),
+              children: _resaltarPalabra(
+                texto,
+                _searchController.text.trim(),
+              ),
+            ),
+          )
+        : Text(
+            texto.isEmpty
+                ? 'No se encontró el fragmento en español.'
+                : texto,
+            style: TextStyle(
+              fontSize: 15,
+              color: Colors.grey[800],
+              height: 1.55,
+            ),
+          );
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: Colors.grey.shade300,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment:
+            CrossAxisAlignment.start,
+        children: [
+          _tituloIdioma(
+            idioma,
+            icono,
+          ),
+          const SizedBox(height: 12),
+          contenido,
+        ],
+      ),
+    );
+  }
+
+  Widget _resultadoCard(
+    Map<String, String> resultado,
+  ) {
+    final fragmento =
+        resultado['fragmento'] ?? '';
+
+    final fragmentoEspanol =
+        resultado['fragmentoEspanol'] ?? '';
+
+    return Card(
+      margin: const EdgeInsets.only(
+        bottom: 16,
+      ),
+      elevation: 2,
+      shadowColor:
+          Colors.black.withValues(alpha: 0.08),
+      shape: RoundedRectangleBorder(
+        borderRadius:
+            BorderRadius.circular(16),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment:
+              CrossAxisAlignment.start,
+          children: [
+            Text(
+              resultado['titulo'] ?? '',
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                height: 1.3,
+              ),
+            ),
+
+            const SizedBox(height: 10),
+
+            if ((resultado['cantidad'] ?? '')
+                .isNotEmpty)
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.indigo.withValues(
+                    alpha: 0.1,
+                  ),
+                  borderRadius:
+                      BorderRadius.circular(20),
+                ),
+                child: Text(
+                  resultado['cantidad'] ?? '',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight:
+                        FontWeight.w600,
+                    color: Colors.indigo,
+                  ),
+                ),
+              ),
+
+            const SizedBox(height: 16),
+
+            // En pantallas grandes mostramos
+            // Pocomchí y español lado a lado.
+            LayoutBuilder(
+              builder: (
+                context,
+                constraints,
+              ) {
+                final ancho =
+                    constraints.maxWidth;
+
+                if (ancho >= 700) {
+                  return Row(
+                    crossAxisAlignment:
+                        CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: _panelIdioma(
+                          idioma: 'POQOMCHÍ',
+                          texto: fragmento,
+                          icono: Icons.translate,
+                          resaltar: true,
+                        ),
+                      ),
+                      const SizedBox(
+                        width: 16,
+                      ),
+                      Expanded(
+                        child: _panelIdioma(
+                          idioma: 'ESPAÑOL',
+                          texto:
+                              fragmentoEspanol,
+                          icono:
+                              Icons.language,
+                          resaltar: false,
+                        ),
+                      ),
+                    ],
+                  );
+                }
+
+                // En teléfono se muestran
+                // uno debajo del otro.
+                return Column(
+                  children: [
+                    _panelIdioma(
+                      idioma: 'POQOMCHÍ',
+                      texto: fragmento,
+                      icono: Icons.translate,
+                      resaltar: true,
+                    ),
+                    const SizedBox(height: 12),
+                    _panelIdioma(
+                      idioma: 'ESPAÑOL',
+                      texto: fragmentoEspanol,
+                      icono: Icons.language,
+                      resaltar: false,
+                    ),
+                  ],
+                );
+              },
+            ),
+
+            const SizedBox(height: 18),
+
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: () {
+                  _abrirArticulo(
+                    resultado['enlace'] ?? '',
+                  );
+                },
+                icon: const Icon(
+                  Icons.open_in_new,
+                  size: 20,
+                ),
+                label: const Text(
+                  'Abrir artículo en WOL',
+                ),
+                style: TextButton.styleFrom(
+                  foregroundColor:
+                      Colors.indigo,
+                  textStyle:
+                      const TextStyle(
+                    fontWeight:
+                        FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(
+    BuildContext context,
+  ) {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.indigo,
@@ -214,7 +607,9 @@ class _SearchPageState extends State<SearchPage> {
         title: const Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.menu_book_rounded),
+            Icon(
+              Icons.menu_book_rounded,
+            ),
             SizedBox(width: 10),
             Text(
               'Buscador Poqomchi\'',
@@ -229,28 +624,30 @@ class _SearchPageState extends State<SearchPage> {
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(
-            maxWidth: 900,
+            maxWidth: 1100,
           ),
           child: Padding(
-            padding: const EdgeInsets.all(24),
+            padding:
+                const EdgeInsets.all(24),
             child: Column(
               children: [
                 const SizedBox(height: 20),
 
-                // Encabezado
                 const Text(
                   'Buscar en las publicaciones de jw.org',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 30,
-                    fontWeight: FontWeight.bold,
+                    fontWeight:
+                        FontWeight.bold,
                   ),
                 ),
 
                 const SizedBox(height: 8),
 
                 Text(
-                  'Encuentra palabras y expresiones en poqomchi\'',
+                  'Encuentra palabras y expresiones '
+                  'en poqomchi\'',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 16,
@@ -260,52 +657,84 @@ class _SearchPageState extends State<SearchPage> {
 
                 const SizedBox(height: 28),
 
-                // Campo de búsqueda
                 Row(
                   children: [
                     Expanded(
                       child: TextField(
-                        controller: _searchController,
-                        textInputAction: TextInputAction.search,
-                        onSubmitted: (_) => _buscar(),
-                        decoration: InputDecoration(
-                          hintText: "Ejemplo: k'uhb'aal",
-                          prefixIcon: const Icon(
+                        controller:
+                            _searchController,
+                        textInputAction:
+                            TextInputAction.search,
+                        onSubmitted: (_) =>
+                            _buscar(),
+                        decoration:
+                            InputDecoration(
+                          hintText:
+                              "Ejemplo: k'uhb'aal",
+                          prefixIcon:
+                              const Icon(
                             Icons.search,
                           ),
                           suffixIcon:
-                              _searchController.text.isNotEmpty
+                              _searchController
+                                      .text
+                                      .isNotEmpty
                                   ? IconButton(
-                                      icon: const Icon(
+                                      icon:
+                                          const Icon(
                                         Icons.clear,
                                       ),
-                                      onPressed: () {
-                                        setState(() {
-                                          _searchController.clear();
-                                          _resultados = [];
-                                        });
+                                      onPressed:
+                                          () {
+                                        setState(
+                                          () {
+                                            _searchController
+                                                .clear();
+                                            _resultados =
+                                                [];
+                                          },
+                                        );
                                       },
                                     )
                                   : null,
                           filled: true,
-                          fillColor: Colors.white,
-                          border: OutlineInputBorder(
+                          fillColor:
+                              Colors.white,
+                          border:
+                              OutlineInputBorder(
                             borderRadius:
-                                BorderRadius.circular(14),
-                            borderSide: BorderSide.none,
+                                BorderRadius
+                                    .circular(
+                              14,
+                            ),
+                            borderSide:
+                                BorderSide.none,
                           ),
-                          enabledBorder: OutlineInputBorder(
+                          enabledBorder:
+                              OutlineInputBorder(
                             borderRadius:
-                                BorderRadius.circular(14),
-                            borderSide: BorderSide(
-                              color: Colors.grey.shade300,
+                                BorderRadius
+                                    .circular(
+                              14,
+                            ),
+                            borderSide:
+                                BorderSide(
+                              color: Colors
+                                  .grey
+                                  .shade300,
                             ),
                           ),
-                          focusedBorder: OutlineInputBorder(
+                          focusedBorder:
+                              OutlineInputBorder(
                             borderRadius:
-                                BorderRadius.circular(14),
-                            borderSide: const BorderSide(
-                              color: Colors.indigo,
+                                BorderRadius
+                                    .circular(
+                              14,
+                            ),
+                            borderSide:
+                                const BorderSide(
+                              color:
+                                  Colors.indigo,
                               width: 2,
                             ),
                           ),
@@ -317,8 +746,11 @@ class _SearchPageState extends State<SearchPage> {
 
                     SizedBox(
                       height: 56,
-                      child: ElevatedButton.icon(
-                        onPressed: _buscando ? null : _buscar,
+                      child:
+                          ElevatedButton.icon(
+                        onPressed: _buscando
+                            ? null
+                            : _buscar,
                         icon: _buscando
                             ? const SizedBox(
                                 width: 20,
@@ -326,7 +758,8 @@ class _SearchPageState extends State<SearchPage> {
                                 child:
                                     CircularProgressIndicator(
                                   strokeWidth: 2,
-                                  color: Colors.white,
+                                  color:
+                                      Colors.white,
                                 ),
                               )
                             : const Icon(
@@ -337,16 +770,25 @@ class _SearchPageState extends State<SearchPage> {
                               ? 'Buscando...'
                               : 'Buscar',
                         ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.indigo,
-                          foregroundColor: Colors.white,
+                        style:
+                            ElevatedButton
+                                .styleFrom(
+                          backgroundColor:
+                              Colors.indigo,
+                          foregroundColor:
+                              Colors.white,
                           padding:
-                              const EdgeInsets.symmetric(
+                              const EdgeInsets
+                                  .symmetric(
                             horizontal: 22,
                           ),
-                          shape: RoundedRectangleBorder(
+                          shape:
+                              RoundedRectangleBorder(
                             borderRadius:
-                                BorderRadius.circular(14),
+                                BorderRadius
+                                    .circular(
+                              14,
+                            ),
                           ),
                         ),
                       ),
@@ -356,16 +798,19 @@ class _SearchPageState extends State<SearchPage> {
 
                 const SizedBox(height: 24),
 
-                // Contador
                 if (_resultados.isNotEmpty)
                   Align(
-                    alignment: Alignment.centerLeft,
+                    alignment:
+                        Alignment.centerLeft,
                     child: Text(
-                      '${_resultados.length} resultados encontrados',
+                      '${_resultados.length} '
+                      'resultados encontrados',
                       style: TextStyle(
                         fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.grey[800],
+                        fontWeight:
+                            FontWeight.w600,
+                        color:
+                            Colors.grey[800],
                       ),
                     ),
                   ),
@@ -373,168 +818,47 @@ class _SearchPageState extends State<SearchPage> {
                 if (_resultados.isNotEmpty)
                   const SizedBox(height: 12),
 
-                // Resultados
                 Expanded(
                   child: _resultados.isEmpty
                       ? Center(
                           child: Column(
-                            mainAxisSize: MainAxisSize.min,
+                            mainAxisSize:
+                                MainAxisSize.min,
                             children: [
                               Icon(
-                                Icons.search_rounded,
+                                Icons
+                                    .search_rounded,
                                 size: 64,
-                                color: Colors.grey[400],
+                                color: Colors
+                                    .grey[400],
                               ),
-                              const SizedBox(height: 12),
+                              const SizedBox(
+                                height: 12,
+                              ),
                               Text(
                                 _buscando
                                     ? 'Buscando resultados...'
-                                    : 'Los resultados aparecerán aquí',
+                                    : 'Los resultados '
+                                        'aparecerán aquí',
+                                textAlign:
+                                    TextAlign
+                                        .center,
                                 style: TextStyle(
                                   fontSize: 16,
-                                  color: Colors.grey[600],
+                                  color: Colors
+                                      .grey[600],
                                 ),
                               ),
                             ],
                           ),
                         )
                       : ListView.builder(
-                          itemCount: _resultados.length,
-                          itemBuilder: (context, index) {
-                            final resultado =
-                                _resultados[index];
-
-                            return Card(
-                              margin: const EdgeInsets.only(
-                                bottom: 14,
-                              ),
-                              elevation: 2,
-                              shadowColor:
-                                  Colors.black.withValues(
-                                alpha: 0.08,
-                              ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius:
-                                    BorderRadius.circular(16),
-                              ),
-                              child: InkWell(
-                                onTap: () {
-                                  _abrirArticulo(
-                                    resultado['enlace'] ?? '',
-                                  );
-                                },
-                                borderRadius:
-                                    BorderRadius.circular(16),
-                                child: Padding(
-                                  padding:
-                                      const EdgeInsets.all(20),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      // Título
-                                      Text(
-                                        resultado['titulo'] ?? '',
-                                        style: const TextStyle(
-                                          fontSize: 18,
-                                          fontWeight:
-                                              FontWeight.bold,
-                                          height: 1.3,
-                                        ),
-                                      ),
-
-                                      const SizedBox(height: 10),
-
-                                      // Cantidad
-                                      if ((resultado[
-                                                  'cantidad'] ??
-                                              '')
-                                          .isNotEmpty)
-                                        Container(
-                                          padding:
-                                              const EdgeInsets
-                                                  .symmetric(
-                                            horizontal: 10,
-                                            vertical: 5,
-                                          ),
-                                          decoration:
-                                              BoxDecoration(
-                                            color: Colors.indigo
-                                                .withValues(
-                                              alpha: 0.1,
-                                            ),
-                                            borderRadius:
-                                                BorderRadius
-                                                    .circular(20),
-                                          ),
-                                          child: Text(
-                                            resultado[
-                                                    'cantidad'] ??
-                                                '',
-                                            style:
-                                                const TextStyle(
-                                              fontSize: 13,
-                                              fontWeight:
-                                                  FontWeight.w600,
-                                              color:
-                                                  Colors.indigo,
-                                            ),
-                                          ),
-                                        ),
-
-                                      const SizedBox(height: 16),
-
-                                      // Fragmento
-                                      RichText(
-                                        text: TextSpan(
-                                          style: TextStyle(
-                                            fontSize: 15,
-                                            color:
-                                                Colors.grey[800],
-                                            height: 1.5,
-                                          ),
-                                          children:
-                                              _resaltarPalabra(
-                                            resultado[
-                                                    'fragmento'] ??
-                                                '',
-                                            _searchController
-                                                .text
-                                                .trim(),
-                                          ),
-                                        ),
-                                      ),
-
-                                      const SizedBox(height: 18),
-
-                                      // Abrir artículo
-                                      const Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.end,
-                                        children: [
-                                          Text(
-                                            'Abrir artículo',
-                                            style: TextStyle(
-                                              fontWeight:
-                                                  FontWeight.w600,
-                                              color:
-                                                  Colors.indigo,
-                                            ),
-                                          ),
-                                          SizedBox(width: 6),
-                                          Icon(
-                                            Icons
-                                                .arrow_forward_rounded,
-                                            size: 20,
-                                            color:
-                                                Colors.indigo,
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
+                          itemCount:
+                              _resultados.length,
+                          itemBuilder:
+                              (context, index) {
+                            return _resultadoCard(
+                              _resultados[index],
                             );
                           },
                         ),

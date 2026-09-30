@@ -239,7 +239,7 @@ class _SearchPageState extends State<SearchPage> {
 
                 // Encabezado
                 const Text(
-                  'Buscar en las publicaciones',
+                  'Buscar en las publicaciones de jw.org',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 30,

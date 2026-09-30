@@ -56,9 +56,14 @@ class _SearchPageState extends State<SearchPage> {
       _resultados = [];
     });
 
-    final url = Uri.parse(
-    '${Uri.base.origin}/.netlify/functions/wol-proxy'
-     '?q=${Uri.encodeComponent(palabra)}',
+final url = Uri.https(
+  'wol.jw.org',
+  '/poh/wol/s/r1086/lp-pqm',
+  {
+    'q': palabra,
+    'p': 'par',
+    'r': 'occ',
+  },
 );
 
     try {
